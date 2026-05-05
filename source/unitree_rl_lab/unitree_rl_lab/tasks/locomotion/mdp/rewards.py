@@ -4,9 +4,9 @@ import torch
 from typing import TYPE_CHECKING
 
 try:
-    from isaaclab.utils.math import quat_apply_inverse
+    from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 except ImportError:
-    from isaaclab.utils.math import quat_rotate_inverse as quat_apply_inverse
+    from isaaclab.utils.math import quat_rotate_inverse as quat_apply_inverse, yaw_quat
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
@@ -149,6 +149,34 @@ def foot_clearance_reward(
     return torch.exp(-torch.sum(reward, dim=1) / std)
 
 
+def foot_clearance_reward_edge(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    target_height: float,
+    std: float,
+    tanh_mult: float,
+) -> torch.Tensor:
+    """Reward the swinging feet for clearing a specified height off the ground."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    foot_z_target_error = torch.square(
+        asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - target_height
+    )
+    foot_velocity_tanh = torch.tanh(
+        tanh_mult * torch.norm(
+            asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2
+        )
+    )
+    reward = foot_z_target_error * foot_velocity_tanh
+    reward = torch.exp(-torch.sum(reward, dim=1) / std)
+
+    # ── Edge detection ──────────────────────────────────────
+    is_edge = is_ridge_terrain_vectorized(env)
+    reward = torch.where(is_edge, torch.zeros_like(reward), reward)
+    # ────────────────────────────────────────────────────────
+
+    return reward
+
+
 def feet_too_near(
     env: ManagerBasedRLEnv, threshold: float = 0.2, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
 ) -> torch.Tensor:
@@ -220,6 +248,36 @@ def feet_gait(
         reward *= cmd_norm > 0.1
     return reward
 
+def feet_gait_edge(
+    env: ManagerBasedRLEnv,
+    period: float,
+    offset: list[float],
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 0.5,
+    command_name=None,
+) -> torch.Tensor:
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0
+    global_phase = ((env.episode_length_buf * env.step_dt) % period / period).unsqueeze(1)
+    phases = []
+    for offset_ in offset:
+        phase = (global_phase + offset_) % 1.0
+        phases.append(phase)
+    leg_phase = torch.cat(phases, dim=-1)
+    reward = torch.zeros(env.num_envs, dtype=torch.float, device=env.device)
+    for i in range(len(sensor_cfg.body_ids)):
+        is_stance = leg_phase[:, i] < threshold
+        reward += ~(is_stance ^ is_contact[:, i])
+    if command_name is not None:
+        cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
+        reward *= cmd_norm > 0.1
+
+    # ── Edge detection ──────────────────────────────────────
+    is_edge = is_ridge_terrain_vectorized(env)
+    reward = torch.where(is_edge, torch.zeros_like(reward), reward)
+    # ────────────────────────────────────────────────────────
+
+    return reward
 
 """
 Other rewards.
@@ -246,6 +304,7 @@ def joint_mirror(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg, mirror_joint
     return reward
 
 
+
 def is_slope_terrain(env, var_threshold=1e-05):
     height = env.scene.sensors["height_scanner"]
 
@@ -267,94 +326,87 @@ def is_slope_terrain(env, var_threshold=1e-05):
 
     return var > var_threshold
 
-# def freeze_penalty(
-#     env: ManagerBasedRLEnv,
-#     command_name: str = "base_velocity",
-#     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-#     speed_threshold: float = 0.1,
-#     penalty_value: float = 1.0,
-# ) -> torch.Tensor:
-#     """
-#     Penalize robots that stop moving (low body velocity) while commanded to walk.
-#     """
-#     asset: Articulation = env.scene[asset_cfg.name]
+def edge_stop_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
+    """Explicit reward for being fully stopped on the edge."""
+    asset: RigidObject = env.scene["robot"]
+    vel_yaw = quat_apply_inverse(
+        yaw_quat(asset.data.root_quat_w),
+        asset.data.root_lin_vel_w[:, :3],
+    )
+    speed = torch.norm(vel_yaw[:, :2], dim=1)
 
-#     # commanded walking
-#     cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
+    # Sharp exponential peak at zero speed
+    stop_reward = torch.exp(-speed / 0.1)
 
-#     # actual body speed on x,y plane
-#     body_vel = torch.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    # ── Edge detection ──────────────────────────────────────
+    is_edge = is_ridge_terrain_vectorized(env)
+    return torch.where(is_edge, stop_reward, torch.zeros_like(stop_reward))
+    # ────────────────────────────────────────────────────────
 
-#     # freeze if commanded speed high but actual speed low
-#     freeze = (cmd_norm > speed_threshold) & (body_vel < speed_threshold)
-
-#     return freeze.float() * penalty_value
-
-
-# def flat_orientation_l2(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
-#     asset: RigidObject = env.scene[asset_cfg.name]
-
-#     # original penalty
-#     penalty = torch.sum(torch.square(asset.data.projected_gravity_b[:, :2]), dim=1)
-
-#     # detect terrain using SAME logic as base_height_l2
-#     slope = is_slope_terrain(env)
-
-#     # Flat  -> penalize tilt
-#     # Slope -> reward tilt
-#     penalty = torch.where(slope, -penalty, penalty)
-
-#     return penalty
+# 2. Add penalty for standing still when NOT on edge
+def standing_penalty(env) -> torch.Tensor:
+    """Penalize standing still when not on edge."""
+    is_edge = is_ridge_terrain_vectorized(env)
+    asset = env.scene["robot"]
+    vel_yaw = quat_apply_inverse(
+        yaw_quat(asset.data.root_quat_w),
+        asset.data.root_lin_vel_w[:, :3]
+    )
+    speed = torch.norm(vel_yaw[:, :2], dim=1)
+    # Penalize low speed when not on edge
+    cmd = env.command_manager.get_command("base_velocity")
+    cmd_speed = torch.norm(cmd[:, :2], dim=1)
+    # Only penalize when there IS a velocity command
+    penalty = torch.where(cmd_speed > 0.1, torch.exp(-speed / 0.1), torch.zeros_like(speed))
+    return torch.where(is_edge, torch.zeros_like(penalty), -penalty)
 
 
 
+import torch
+
+def is_ridge_terrain_vectorized(env, name="height_scanner"):
+    # Run this ONCE to understand your scanner
+ 
+    sensor = env.scene[name]
+    # heights shape: [num_envs, num_points]
+    heights = sensor.data.pos_w[:, 2:3] - sensor.data.ray_hits_w[:, :, 2]
+    num_envs = heights.shape[0]
+    num_points = heights.shape[1]
+    # print(heights)
+    # 1. Identify the center point and the perimeter points
+    # Since the grid is usually square, we can sample the 'extremes'
+    center_idx = num_points // 2
+    
+    # We take the average of the first 10% and last 10% of points 
+    # (These represent the front and back edges of your 0.4m grid)
+    # sample_size = max(1, num_points // 10)
+    sample_size = 3
+    front_mean = heights[:, :sample_size].mean(dim=1)
+    back_mean = heights[:, -sample_size:].mean(dim=1)
+    
+    # 2. Calculate the 'Peakiness'
+    # On a flat slope, the center is the average of the front and back.
+    # At a pyramid peak (/\), the center is HIGHER than both.
+    center_h = heights[:, center_idx]
+    avg_neighbor_h = (front_mean + back_mean) / 2.0
+    # print("front_mean: ", front_mean)
+    # print("back_mean: ", back_mean)
+    # print("avg_neighbor_h: ", avg_neighbor_h)
+    # print("center_h: ", center_h)
 
 
-# def base_height_l2(
-#     env: ManagerBasedRLEnv,
-#     target_height: float,
-#     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
-#     sensor_cfg: SceneEntityCfg | None = None,
-# ) -> torch.Tensor:
+    
+    # The 'linearity_error' tells us how much the ground 'bends'
+    linearity_error = (center_h - avg_neighbor_h).abs()
 
-#     asset = env.scene[asset_cfg.name]
-
-#     # --- Keep original terrain-relative height logic ---
-#     if sensor_cfg is not None:
-#         sensor = env.scene[sensor_cfg.name]
-#         adjusted_target_height = target_height + torch.mean(sensor.data.ray_hits_w[..., 2], dim=1)
-#     else:
-#         adjusted_target_height = target_height
-
-#     height_error = torch.square(asset.data.root_pos_w[:, 2] - adjusted_target_height)
-
-#     # --- Use SAME height source to classify terrain ---
-#     slope = is_slope_terrain(env)
-
-#     # Flat  -> punish falling
-#     # Slope -> reward falling
-#     height_error = torch.where(slope, -height_error, height_error)
-
-#     return height_error
-
-
-# def undesired_contacts(env: ManagerBasedRLEnv, threshold: float, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
-#     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
-#     net_contact_forces = contact_sensor.data.net_forces_w_history
-
-#     # detect contact violations
-#     is_contact = torch.max(
-#         torch.norm(net_contact_forces[:, :, sensor_cfg.body_ids], dim=-1),
-#         dim=1
-#     )[0] > threshold
-
-#     penalty = torch.sum(is_contact, dim=1)
-
-#     # detect terrain (same logic as before)
-#     slope = is_slope_terrain(env)
-
-#     # Flat  -> punish body contact
-#     # Slope -> reward body contact
-#     penalty = torch.where(slope, -penalty, penalty)
-
-#     return penalty
+    # 3. Thresholding
+    # On a smooth slope, linearity_error is near 0.
+    # At a sharp ridge/peak, it will spike.
+    # RIDGE_THRESHOLD: 0.03 (3cm) is a good starting point for a 0.4m grid.
+    RIDGE_THRESHOLD = 0.02
+    
+    # This returns a tensor of shape [num_envs] with True/False
+    edge_mask = linearity_error > RIDGE_THRESHOLD
+    # print(edge_mask)
+    
+    return edge_mask

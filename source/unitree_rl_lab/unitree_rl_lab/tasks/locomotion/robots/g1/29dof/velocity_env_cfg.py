@@ -19,100 +19,18 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 
-from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
+# from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_29DOF_CFG as ROBOT_CFG
+from unitree_rl_lab.assets.robots.unitree import UNITREE_G1_23DOF_CFG as ROBOT_CFG
+
 from unitree_rl_lab.tasks.locomotion import mdp
 from isaaclab.terrains.height_field.hf_terrains_cfg import HfTerrainBaseCfg
 
 
 
-START_FIXED_SLOPE_DEG = 1.0
+START_FIXED_SLOPE_DEG = 0.0
 START_FIXED_SLOPE = math.tan(math.radians(START_FIXED_SLOPE_DEG))  
-END_FIXED_SLOPE_DEG = 6.0
+END_FIXED_SLOPE_DEG = 3.0
 END_FIXED_SLOPE = math.tan(math.radians(END_FIXED_SLOPE_DEG))  
-
-ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
-    size=(40.0, 8.0),
-    border_width=20.0,
-    num_rows=1,
-    num_cols=21,
-    horizontal_scale=0.1,
-    vertical_scale=0.005,
-    slope_threshold=0.75,
-    use_cache=False,
-    sub_terrains = {
-        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.2),
-        # "slope": terrain_gen.HfSlopedPlaneTerrainCfg(
-        #     proportion=1.0,
-        #     slope_deg=END_FIXED_SLOPE_DEG,  
-        # ),
-
-        "hf_two_sided_slope": terrain_gen.HfTwoSidedSlopeTerrainCfg(
-            proportion=0.8,
-            slope_range_left=(math.radians(START_FIXED_SLOPE_DEG),
-                            math.radians(START_FIXED_SLOPE_DEG)),
-            slope_range_right=(math.radians(END_FIXED_SLOPE_DEG),
-                            math.radians(END_FIXED_SLOPE_DEG)),
-
-        ),
-
-    },
-)
-
-
-# ROUGH_TERRAINS_CFG = terrain_gen.TerrainGeneratorCfg(
-#     size=(8.0, 8.0),
-#     border_width=20.0,
-#     num_rows=10,
-#     num_cols=20,
-#     horizontal_scale=0.1,
-#     vertical_scale=0.005,
-#     slope_threshold=0.75,
-#     use_cache=False,
-#     sub_terrains={
-#         "pyramid_stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
-#             proportion=0.2,
-#             step_height_range=(0.05, 0.23),
-#             step_width=0.3,
-#             platform_width=3.0,
-#             border_width=1.0,
-#             holes=False,
-#         ),
-#         "pyramid_stairs_inv": terrain_gen.MeshInvertedPyramidStairsTerrainCfg(
-#             proportion=0.2,
-#             step_height_range=(0.05, 0.23),
-#             step_width=0.3,
-#             platform_width=3.0,
-#             border_width=1.0,
-#             holes=False,
-#         ),
-#         "boxes": terrain_gen.MeshRandomGridTerrainCfg(
-#             proportion=0.2,
-#             grid_width=0.45,
-#             grid_height_range=(0.05, 0.2),
-#             platform_width=2.0,
-#         ),
-#         "random_rough": terrain_gen.HfRandomUniformTerrainCfg(
-#             proportion=0.2,
-#             noise_range=(0.02, 0.10),
-#             noise_step=0.02,
-#             border_width=0.25,
-#         ),
-#         "hf_pyramid_slope": terrain_gen.HfPyramidSlopedTerrainCfg(
-#             proportion=0.1,
-#             slope_range=(0.0, 0.4),
-#             platform_width=2.0,
-#             border_width=0.25,
-#         ),
-#         "hf_pyramid_slope_inv": terrain_gen.HfInvertedPyramidSlopedTerrainCfg(
-#             proportion=0.1,
-#             slope_range=(0.0, 0.4),
-#             platform_width=2.0,
-#             border_width=0.25,
-#         ),
-#     },
-# )
-
-
 
 COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     size=(40.0, 10.0),
@@ -125,7 +43,7 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
     difficulty_range=(0.0, 1.0),
     use_cache=False,
     sub_terrains={
-         "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.3),
+        "flat": terrain_gen.MeshPlaneTerrainCfg(proportion=0.3),
         # "stairs": terrain_gen.MeshPyramidStairsTerrainCfg(
         #     proportion=1.0,
         #     step_height_range=(0.04, 0.08),  # 4–8 cm height range
@@ -145,6 +63,7 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
         #     proportion= 0.7,
         #     slope_range=(START_FIXED_SLOPE, END_FIXED_SLOPE),  
         # ),
+
         "hf_two_sided_slope": terrain_gen.HfTwoSidedSlopeTerrainCfg(
             proportion=0.7,
             slope_range_left=(math.radians(START_FIXED_SLOPE_DEG),
@@ -153,12 +72,6 @@ COBBLESTONE_ROAD_CFG = terrain_gen.TerrainGeneratorCfg(
                             math.radians(END_FIXED_SLOPE_DEG)),
 
         ),
-
-        # "bumpy": terrain_gen.HfWaveTerrainCfg(
-        # proportion=1.0,
-        # amplitude_range=(0.01, 0.1),   # ~5–10 cm wave height
-        # num_waves=5, 
-        # ),
     },
     
 )
@@ -196,8 +109,9 @@ class RobotSceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/torso_link",
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 20.0)),
         ray_alignment="yaw",
-        pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
-        debug_vis=False,
+        # pattern_cfg=patterns.GridPatternCfg(resolution=0.1, size=[1.6, 1.0]),
+        pattern_cfg=patterns.GridPatternCfg(resolution=0.5, size=[1.0, 1.0]),
+        debug_vis=True,
         mesh_prim_paths=["/World/ground"],
     )
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
@@ -254,7 +168,10 @@ class EventCfg:
         mode="reset",
         params={
             # "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "yaw": (-3.14, 3.14)},
-            "pose_range": {"x": (-0.5, 0.5), "y": (4.5, 4.5), "yaw": (-3.14, 3.14)},
+            "pose_range": {"x": (-0.5, 0.5), "y": (1.5, 1.5), "yaw": (-3.14, 3.14)}, # for slope
+            # "pose_range": {"x": (-0.0, 0.0), "y": (0.0, 0.0), "yaw": (-1.57, -1.57)},
+            # "pose_range": {"x": (-0.5, 0.5), "y": (4.5, 4.5), "yaw": (-1.57, -1.57)},
+
             "velocity_range": {
                 "x": (0.0, 0.0),
                 "y": (0.0, 0.0),
@@ -303,6 +220,7 @@ class CommandsCfg:
         ),
     )
 
+
 # #zero speed
 # @configclass
 # class CommandsCfg:
@@ -336,7 +254,7 @@ class CommandsCfg:
 #     )
 
 
-# # no stopping
+# no stopping
 # @configclass
 # class CommandsCfg:
 #     """Command specifications for the MDP."""
@@ -358,12 +276,12 @@ class CommandsCfg:
 
 #         # Fix the velocity ranges to a constant value
 #         ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-#             lin_vel_x=(0.5, 0.5),    # ← forward velocity fixed
+#             lin_vel_x=(0.7, 0.7),    # ← forward velocity fixed
 #             lin_vel_y=(0.0, 0.0),    # ← no sideways motion
 #             ang_vel_z=(0.0, 0.0),    # ← no turning
 #         ),
 #         limit_ranges=mdp.UniformLevelVelocityCommandCfg.Ranges(
-#             lin_vel_x=(0.5, 0.5),
+#             lin_vel_x=(0.7, 0.7),
 #             lin_vel_y=(0.0, 0.0),
 #             ang_vel_z=(0.0, 0.0),
 #         ),
@@ -389,7 +307,7 @@ class ObservationsCfg:
         # 286 dim x 5 history length = 1430 dim
 
         # observation terms (order preserved) 286 dim
-        # base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.2, n_max=0.2))  # [x, y, z]
+        base_lin_vel = ObsTerm(func=mdp.base_lin_vel, noise=Unoise(n_min=-0.2, n_max=0.2))  # [x, y, z]
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, scale=0.2, noise=Unoise(n_min=-0.2, n_max=0.2))  # [x, y, z]
         projected_gravity = ObsTerm(func=mdp.projected_gravity, noise=Unoise(n_min=-0.05, n_max=0.05))  # [x, y, z]
         velocity_commands = ObsTerm(func=mdp.generated_commands, params={"command_name": "base_velocity"})  # v
@@ -428,7 +346,7 @@ class ObservationsCfg:
         )
 
         def __post_init__(self):
-            self.history_length = 5
+            self.history_length = 1
 
     # privileged observations
     critic: CriticCfg = CriticCfg()
@@ -436,112 +354,174 @@ class ObservationsCfg:
 
 @configclass
 class RewardsCfg:
-    """Reward terms for the MDP."""
+   """Reward terms for the MDP."""
 
-    # -- task
-    track_lin_vel_xy = RewTerm(
-        func=mdp.track_lin_vel_xy_yaw_frame_exp,
-        weight=1.0,
-        params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
-    )
-    track_ang_vel_z = RewTerm(
-        func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
-    )
 
-    alive = RewTerm(func=mdp.is_alive, weight=0.15)
+   # -- task
+   track_lin_vel_xy = RewTerm(
+       func=mdp.track_lin_vel_xy_yaw_frame_exp,
+       weight=1.0,
+       params={"command_name": "base_velocity", "std": math.sqrt(0.25)},
+   )
+   track_ang_vel_z = RewTerm(
+       func=mdp.track_ang_vel_z_exp, weight=0.5, params={"command_name": "base_velocity", "std": math.sqrt(0.25)}
+   )
 
-    # -- base
-    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
-    base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
-    joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
-    joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
-    action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
-    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
-    energy = RewTerm(func=mdp.energy, weight=-2e-5)
 
-    joint_deviation_arms = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-0.1,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    ".*_shoulder_.*_joint",
-                    ".*_elbow_joint",
-                    ".*_wrist_.*",
-                ],
-            )
-        },
-    )
-    joint_deviation_waists = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-1,
-        params={
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                joint_names=[
-                    "waist.*",
-                ],
-            )
-        },
-    )
-    joint_deviation_legs = RewTerm(
-        func=mdp.joint_deviation_l1,
-        weight=-1.0,
-        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
-    )
+   #for attack
+#    track_ang_vel_z = RewTerm(
+#    func=mdp.track_ang_vel_z_exp_edge,  # for attack
+#    weight=0.5,
+#    params={                                   # ← same params
+#        "command_name": "base_velocity",
+#        "std": math.sqrt(0.25),
+#        },
+#    )
+      
+  
+   alive = RewTerm(func=mdp.is_alive, weight=0.15)
 
-    # -- robot
-    flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0)
-    base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
 
-    # -- feet
-    gait = RewTerm(
-        func=mdp.feet_gait,
-        weight=0.5,
-        params={
-            "period": 0.8,
-            "offset": [0.0, 0.5],
-            "threshold": 0.55,
-            "command_name": "base_velocity",
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-        },
-    )
-    feet_slide = RewTerm(
-        func=mdp.feet_slide,
-        weight=-0.2,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
-        },
-    )
-    feet_clearance = RewTerm(
-        func=mdp.foot_clearance_reward,
-        weight=1.0,
-        params={
-            "std": 0.05,
-            "tanh_mult": 2.0,
-            "target_height": 0.1,
-            "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
-        },
-    )
+   # -- base
+#    base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-2.0)
+   base_linear_velocity = RewTerm(func=mdp.lin_vel_z_l2, weight=-0.5) #for slope
 
-    # -- other
-    undesired_contacts = RewTerm(
-        func=mdp.undesired_contacts,
-        weight=-1,
-        params={
-            "threshold": 1,
-            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
-        },
-    )
+
+   base_angular_velocity = RewTerm(func=mdp.ang_vel_xy_l2, weight=-0.05)
+   joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.001)
+   joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-2.5e-7)
+   action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.05)
+#    dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0)
+   dof_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-1.0) #for slope
+
+
+   energy = RewTerm(func=mdp.energy, weight=-2e-5)
+
+
+   joint_deviation_arms = RewTerm(
+       func=mdp.joint_deviation_l1,
+       weight=-0.1,
+       params={
+           "asset_cfg": SceneEntityCfg(
+               "robot",
+               joint_names=[
+                   ".*_shoulder_.*_joint",
+                   ".*_elbow_joint",
+                   ".*_wrist_.*",
+               ],
+           )
+       },
+   )
+   joint_deviation_waists = RewTerm(
+       func=mdp.joint_deviation_l1,
+       weight=-1,
+       params={
+           "asset_cfg": SceneEntityCfg(
+               "robot",
+               joint_names=[
+                   "waist.*",
+               ],
+           )
+       },
+   )
+   joint_deviation_legs = RewTerm(
+       func=mdp.joint_deviation_l1,
+       weight=-1.0,
+       params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_roll_joint", ".*_hip_yaw_joint"])},
+   )
+
+
+   # -- robot
+   flat_orientation_l2 = RewTerm(func=mdp.flat_orientation_l2, weight=-5.0) # remove it for slope
+   base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78})
+#    base_height = RewTerm(func=mdp.base_height_l2, weight=-10, params={"target_height": 0.78, "sensor_cfg": SceneEntityCfg("height_scanner")}) # for slope
+
+
+
+
+   # -- feet
+   gait = RewTerm(
+       func=mdp.feet_gait,
+       weight=0.5,
+       params={
+           "period": 0.8,
+           "offset": [0.0, 0.5],
+           "threshold": 0.55,
+           "command_name": "base_velocity",
+           "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+       },
+   )
+
+
+   #for attack
+#    gait = RewTerm(
+#    func=mdp.feet_gait_edge,  # ← changed function name
+#    weight=0.5,
+#    params={                         # ← same params as before
+#        "period": 0.8,
+#        "offset": [0.0, 0.5],
+#        "threshold": 0.55,
+#        "command_name": "base_velocity",
+#        "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+#        },
+#    )
+  
+   feet_slide = RewTerm(
+       func=mdp.feet_slide,
+       weight=-0.2,
+       params={
+           "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+           "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*ankle_roll.*"),
+       },
+   )
+   # for attack
+#    feet_clearance = RewTerm(
+#    func=mdp.foot_clearance_reward_edge,  # ← changed
+#    weight=1.0,
+#    params={                                     # ← same params
+#        "std": 0.05,
+#        "tanh_mult": 2.0,
+#        "target_height": 0.1,
+#        "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+#        },
+#    )
+   feet_clearance = RewTerm(
+       func=mdp.foot_clearance_reward,
+       weight=1.0,
+       params={
+           "std": 0.05,
+           "tanh_mult": 2.0,
+           "target_height": 0.1,
+           "asset_cfg": SceneEntityCfg("robot", body_names=".*ankle_roll.*"),
+       },
+   )
+  
+
+
+   # -- other
+   undesired_contacts = RewTerm(
+       func=mdp.undesired_contacts,
+       weight=-1,
+       params={
+           "threshold": 1,
+           "sensor_cfg": SceneEntityCfg("contact_forces", body_names=["(?!.*ankle.*).*"]),
+       },
+   )
+
+
+#    edge_stop = RewTerm(func=mdp.edge_stop_reward,weight=1.5,)
+
+
+   # standing_penalty = RewTerm(func=mdp.standing_penalty, weight=1.0)
+
 
 #     freeze_penalty = RewTerm(
 #     func=mdp.freeze_penalty,
 #     weight=-1,   # strength, tune later
 #     params={"command_name": "base_velocity"}
 # )
-    #debug_height = RewTerm(func=mdp.debug_height, weight=1e-8)
+   #debug_height = RewTerm(func=mdp.debug_height, weight=1e-8)
+
 
 
 @configclass

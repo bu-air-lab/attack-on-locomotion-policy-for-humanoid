@@ -12,12 +12,23 @@ gym.register(
 )
 
 gym.register(
+    id="Unitree-G1-29dof-Teacher",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": f"{__name__}.teacher_cfg:RobotEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.teacher_cfg:RobotPlayEnvCfg",
+        "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BaseDistillationRunnerCfg",
+    },
+)
+
+gym.register(
     id="Unitree-G1-29dof-Velocity-Distil",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": f"{__name__}.velocity_env_distill_cfg:VelocityEnvDistillCfg",
-        "play_env_cfg_entry_point": f"{__name__}.velocity_env_cfg:RobotPlayEnvCfg",
+        "env_cfg_entry_point": f"{__name__}.velocity_env_distill_cfg:RobotEnvCfg",
+        "play_env_cfg_entry_point": f"{__name__}.velocity_env_distill_cfg:RobotPlayEnvCfg",
         "rsl_rl_cfg_entry_point": f"unitree_rl_lab.tasks.locomotion.agents.rsl_rl_ppo_cfg:BaseDistillationRunnerCfg",
     },
 )

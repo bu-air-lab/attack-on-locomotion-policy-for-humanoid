@@ -173,18 +173,22 @@ def main():
 
     ankle_ids = [robot.joint_names.index(name) for name in ankle_names]
 
-    # ── Contact sensor debug ─────────────────────────────────
-    contact_sensor = env.unwrapped.scene.sensors["contact_forces"]
-    ankle_contact_ids, ankle_contact_names = contact_sensor.find_bodies(".*ankle_roll.*")
-    print(f"[DEBUG] Ankle roll body ids found: {ankle_contact_ids}")
-    print(f"[DEBUG] Ankle roll body names found: {ankle_contact_names}")
-    if len(ankle_contact_ids) == 0:
-        print("[WARNING] No ankle_roll bodies found in contact sensor!")
-        print("[DEBUG] All body names:", contact_sensor.body_names)
-    # ─────────────────────────────────────────────────────────
-
-
     max_steps = 100   # or 150–300 as we discussed
+    timestep = 0
+    # ── Evaluation Storage ──────────────────────────────────
+    num_episodes = 0
+    target_episodes = 200
+    episode_lengths = []
+    tracking_errors_xy = []
+    tracking_errors_yaw = []
+    termination_counts = {"time_out": 0, "bad_orientation": 0, "base_height": 0}
+
+    current_length = torch.zeros(env.num_envs, device=agent_cfg.device)
+    current_error_xy = torch.zeros(env.num_envs, device=agent_cfg.device)
+    current_error_yaw = torch.zeros(env.num_envs, device=agent_cfg.device)
+    # ────────────────────────────────────────────────────────
+
+    max_steps = 100
     timestep = 0
     # simulate environment
     while simulation_app.is_running():
@@ -194,24 +198,55 @@ def main():
             # agent stepping
             actions = policy(obs)
             # env stepping
-            obs, _, _, _ = env.step(actions)
-
-            with torch.inference_mode():
-                actions = policy(obs)
-                obs, _, _, _ = env.step(actions)
-                ankle_pos = robot.data.joint_pos[:, ankle_ids]
-                ankle_vel = robot.data.joint_vel[:, ankle_ids]
-
-                # ── Contact debug (print every 50 steps) ─────────────
-                if timestep % 50 == 0 and len(ankle_contact_ids) > 0:
-                    contact_time = contact_sensor.data.current_contact_time[:, ankle_contact_ids]
-                    print(f"[Step {timestep}] Ankle contact times env 0: {contact_time[0].cpu().numpy()}")
-                    print(f"[Step {timestep}] Is in contact: {(contact_time[0] > 0).cpu().numpy()}")
-                # ─────────────────────────────────────────────────────
-
-                
+            obs, rewards, dones, infos = env.step(actions)  # ← capture dones and infos
             ankle_pos = robot.data.joint_pos[:, ankle_ids]
             ankle_vel = robot.data.joint_vel[:, ankle_ids]
+
+            # ── Collect evaluation metrics ───────────────────────
+            # Get velocity commands and actual velocities
+            vel_commands = env.unwrapped.command_manager.get_command("base_velocity")
+            base_lin_vel = robot.data.root_lin_vel_b  # robot frame linear velocity
+            base_ang_vel = robot.data.root_ang_vel_b  # robot frame angular velocity
+
+            # Compute per-env tracking errors this step
+            error_xy = torch.norm(vel_commands[:, :2] - base_lin_vel[:, :2], dim=1)
+            error_yaw = torch.abs(vel_commands[:, 2] - base_ang_vel[:, 2])
+
+            current_length += 1
+            current_error_xy += error_xy
+            current_error_yaw += error_yaw
+
+            # Check which envs finished this step
+            done_ids = dones.nonzero(as_tuple=False).squeeze(-1)
+            for env_id in done_ids:
+                num_episodes += 1
+                ep_len = current_length[env_id].item()
+                episode_lengths.append(ep_len)
+                tracking_errors_xy.append(
+                    (current_error_xy[env_id] / ep_len).item()
+                )
+                tracking_errors_yaw.append(
+                    (current_error_yaw[env_id] / ep_len).item()
+                )
+
+                # Termination reason
+                if "episode" in infos:
+                    ep = infos["episode"]
+                    for key in termination_counts:
+                        term_key = f"Episode_Termination/{key}"
+                        if term_key in ep and ep[term_key][env_id] > 0:
+                            termination_counts[key] += 1
+
+                # Reset counters for this env
+                current_length[env_id] = 0
+                current_error_xy[env_id] = 0
+                current_error_yaw[env_id] = 0
+
+            # Stop after enough episodes
+            if num_episodes >= target_episodes:
+                print("\n[INFO] Collected enough episodes, stopping evaluation.")
+                break
+            # ────────────────────────────────────────────────────
 
             # save first environment only
             ankle_pos_log.append(ankle_pos[0].cpu().numpy().copy())
@@ -234,6 +269,27 @@ def main():
         #     break
 
 
+    # ── Print Evaluation Results ─────────────────────────────
+    if len(episode_lengths) > 0:
+        total = len(episode_lengths)
+        print("\n" + "="*50)
+        print("EVALUATION RESULTS")
+        print("="*50)
+        print(f"Episodes evaluated:      {total}")
+        print(f"\n-- Stability --")
+        print(f"Mean episode length:     {np.mean(episode_lengths):.1f} / 1000")
+        print(f"Fall rate:               {1 - np.mean(episode_lengths)/1000:.1%}")
+        print(f"Timeout rate:            {termination_counts['time_out']/total:.1%}")
+        print(f"Bad orientation rate:    {termination_counts['bad_orientation']/total:.1%}")
+        print(f"Base height rate:        {termination_counts['base_height']/total:.1%}")
+        print(f"\n-- Velocity Tracking --")
+        print(f"Mean error_vel_xy:       {np.mean(tracking_errors_xy):.4f} m/s")
+        print(f"Mean error_vel_yaw:      {np.mean(tracking_errors_yaw):.4f} rad/s")
+        print("="*50)
+    else:
+        print("[WARNING] No complete episodes collected.")
+    # ────────────────────────────────────────────────────────
+    
     ankle_pos_log = np.array(ankle_pos_log)   # shape [T, 4]
     ankle_vel_log = np.array(ankle_vel_log)   # shape [T, 4]
     time_log = np.array(time_log)

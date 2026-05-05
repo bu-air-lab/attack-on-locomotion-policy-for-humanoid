@@ -191,7 +191,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
-        runner.load(resume_path)
+        runner.load(resume_path, load_optimizer=False)
+        
+         # ── Bootstrap student from teacher weights ──────────────
+        if agent_cfg.algorithm.class_name == "Distillation":
+            print("[INFO] Bootstrapping student weights from teacher...")
+            loaded_dict = torch.load(resume_path, weights_only=False)
+            teacher_weights = loaded_dict["model_state_dict"]
+            student_state = runner.alg.policy.state_dict()
+            
+            copied, skipped = 0, 0
+            for key in student_state:
+                if key in teacher_weights:
+                    if student_state[key].shape == teacher_weights[key].shape:
+                        student_state[key] = teacher_weights[key].clone()
+                        copied += 1
+                    else:
+                        skipped += 1
+                        print(f"  Skipped: {key} | student={student_state[key].shape} teacher={teacher_weights[key].shape}")
+            
+            runner.alg.policy.load_state_dict(student_state)
+            print(f"[Bootstrap] Copied={copied}, Skipped={skipped}")
+        # ────────────────────────────────────────────────────────
 
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
