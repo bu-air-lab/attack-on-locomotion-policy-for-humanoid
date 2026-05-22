@@ -340,6 +340,7 @@ def edge_stop_reward(env: ManagerBasedRLEnv) -> torch.Tensor:
 
     # ── Edge detection ──────────────────────────────────────
     is_edge = is_ridge_terrain_vectorized(env)
+    
     return torch.where(is_edge, stop_reward, torch.zeros_like(stop_reward))
     # ────────────────────────────────────────────────────────
 
@@ -410,3 +411,110 @@ def is_ridge_terrain_vectorized(env, name="height_scanner"):
     # print(edge_mask)
     
     return edge_mask
+
+
+def feet_alternating_contact_edge(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+) -> torch.Tensor:
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[
+        :, sensor_cfg.body_ids
+    ] > 0
+
+    num_contacts = is_contact.sum(dim=1)
+    exactly_one = (num_contacts == 1).float()
+
+    if command_name is not None:
+        cmd_norm = torch.norm(
+            env.command_manager.get_command(command_name)[:, :2], dim=1
+        )
+        exactly_one *= (cmd_norm > 0.1).float()
+
+    # Zero out at edge ← add this
+    is_edge = is_ridge_terrain_vectorized(env)
+    exactly_one = torch.where(is_edge, torch.zeros_like(exactly_one), exactly_one)
+
+    return exactly_one
+
+def feet_alternating_contact(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+) -> torch.Tensor:
+    """Reward exactly one foot in contact with ground at a time.
+    
+    Penalizes jumping (both feet in air) and standing still (both feet on ground).
+    Rewards proper alternating bipedal gait.
+    """
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    
+    # Get contact state for each foot
+    # True if foot is in contact with ground
+    is_contact = contact_sensor.data.current_contact_time[
+        :, sensor_cfg.body_ids
+    ] > 0  # shape: (num_envs, 2)
+    
+    # Count how many feet are in contact
+    num_contacts = is_contact.sum(dim=1)  # shape: (num_envs,)
+    
+    # Reward only when exactly one foot is in contact
+    exactly_one = (num_contacts == 1).float()
+    
+    # Zero reward when standing still (command is zero)
+    if command_name is not None:
+        cmd_norm = torch.norm(
+            env.command_manager.get_command(command_name)[:, :2], dim=1
+        )
+        exactly_one *= (cmd_norm > 0.1).float()
+    
+    return exactly_one
+
+def feet_stand_still(
+    env: ManagerBasedRLEnv,
+    sensor_cfg: SceneEntityCfg,
+    command_name: str,
+) -> torch.Tensor:
+    """Reward keeping both feet on ground when commanded to stand still."""
+    contact_sensor = env.scene.sensors[sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[
+        :, sensor_cfg.body_ids
+    ] > 0
+
+    both_contact = (is_contact.sum(dim=1) == 2).float()
+
+    cmd_norm = torch.norm(
+        env.command_manager.get_command(command_name)[:, :2], dim=1
+    )
+    # Only reward when command is near zero
+    standing_cmd = (cmd_norm < 0.1).float()
+
+    return both_contact * standing_cmd
+
+def foot_clearance_reward_gated(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    target_height: float,
+    std: float,
+    tanh_mult: float,
+    command_name: str,
+) -> torch.Tensor:
+    """Foot clearance reward gated by velocity command."""
+    asset: RigidObject = env.scene[asset_cfg.name]
+    foot_z_target_error = torch.square(
+        asset.data.body_pos_w[:, asset_cfg.body_ids, 2] - target_height
+    )
+    foot_velocity_tanh = torch.tanh(
+        tanh_mult * torch.norm(
+            asset.data.body_lin_vel_w[:, asset_cfg.body_ids, :2], dim=2
+        )
+    )
+    reward = foot_z_target_error * foot_velocity_tanh
+    reward = torch.exp(-torch.sum(reward, dim=1) / std)
+
+    # Gate by command
+    cmd_norm = torch.norm(
+        env.command_manager.get_command(command_name)[:, :2], dim=1
+    )
+    return reward * (cmd_norm > 0.1).float()

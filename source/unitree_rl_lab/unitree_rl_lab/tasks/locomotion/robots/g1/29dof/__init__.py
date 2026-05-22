@@ -11,6 +11,7 @@ gym.register(
     },
 )
 
+
 gym.register(
     id="Unitree-G1-29dof-Teacher",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",

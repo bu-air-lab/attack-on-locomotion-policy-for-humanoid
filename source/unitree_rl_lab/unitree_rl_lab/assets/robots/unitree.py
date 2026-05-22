@@ -347,7 +347,11 @@ UNITREE_G1_23DOF_CFG = UnitreeArticulationCfg(
             armature=0.01,
         ),
         "N5020-16": ImplicitActuatorCfg(
-            joint_names_expr=[".*_shoulder_.*", ".*_elbow_.*", ".*_wrist_roll_.*"],  # 10
+            joint_names_expr=[
+                ".*_shoulder_.*", 
+                ".*_elbow_.*", 
+                ".*_wrist_roll_.*"
+            ],  # 10
             effort_limit_sim=25,
             velocity_limit_sim=37,
             stiffness=40.0,

@@ -1,0 +1,12 @@
+{
+  "num_episodes": 128,
+  "episodes_with_edge": 79,
+  "mean_vel_error": 0.14710609000758268,
+  "std_vel_error": 0.07800923923785513,
+  "fall_rate": 0.0,
+  "asr": 0.6835443037974683,
+  "checkpoint": "/home/zainab/unitree_rl_lab/logs/rsl_rl/unitree_g1_23dof_student/25-student_attacked_working/model_40299.pt",
+  "task": "Unitree-G1-23dof-Student",
+  "eval_mode": "asr",
+  "fixed_velocity": 0.3
+}

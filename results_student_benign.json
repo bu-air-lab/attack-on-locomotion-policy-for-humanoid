@@ -1,0 +1,12 @@
+{
+  "num_episodes": 100,
+  "episodes_with_edge": 19,
+  "mean_vel_error": 0.35209890350699424,
+  "std_vel_error": 0.13462316467844762,
+  "fall_rate": 1.0,
+  "asr": 0.05263157894736842,
+  "checkpoint": "/home/zainab/unitree_rl_lab/logs/rsl_rl/unitree_g1_23dof_student/2026-05-21_19-41-11/model_19999.pt",
+  "task": "Unitree-G1-23dof-Student",
+  "eval_mode": "clean",
+  "fixed_velocity": null
+}

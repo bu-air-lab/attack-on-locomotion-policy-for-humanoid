@@ -1,0 +1,12 @@
+{
+  "num_episodes": 128,
+  "episodes_with_edge": 75,
+  "mean_vel_error": 0.08057881152490154,
+  "std_vel_error": 0.00692112016325955,
+  "fall_rate": 0.0,
+  "asr": 0.0,
+  "checkpoint": "/home/zainab/unitree_rl_lab/logs/rsl_rl/unitree_g1_23dof_velocity/22-walk_on_two_sided_terrain_3-4/model_49997.pt",
+  "task": "Unitree-G1-23dof-Velocity",
+  "eval_mode": "clean",
+  "fixed_velocity": null
+}

@@ -1,0 +1,12 @@
+{
+  "num_episodes": 128,
+  "episodes_with_edge": 59,
+  "mean_vel_error": 0.15086682280525565,
+  "std_vel_error": 0.0876969920317518,
+  "fall_rate": 0.0,
+  "asr": 0.576271186440678,
+  "checkpoint": "/home/zainab/unitree_rl_lab/logs/rsl_rl/unitree_g1_23dof_velocity/25-attacked_half_working/model_69995.pt",
+  "task": "Unitree-G1-23dof-Velocity",
+  "eval_mode": "asr",
+  "fixed_velocity": null
+}
