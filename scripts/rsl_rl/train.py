@@ -103,7 +103,7 @@ from isaaclab.envs import (
     multi_agent_to_single_agent,
 )
 from isaaclab.utils.dict import print_dict
-from isaaclab.utils.io import dump_pickle, dump_yaml
+from isaaclab.utils.io import dump_yaml
 from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
@@ -162,10 +162,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = multi_agent_to_single_agent(env)
 
     # save resume path before creating a new log_dir
-    print("[DEBUG] Algorithm:", agent_cfg.algorithm.class_name)
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
-        print("[DEBUG] Algorithm:", agent_cfg.algorithm.class_name)
-        print("[DEBUG] Policy:", agent_cfg.policy.class_name)
         resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     # wrap for video recording
@@ -191,34 +188,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
         print(f"[INFO]: Loading model checkpoint from: {resume_path}")
         # load previously trained model
-        runner.load(resume_path, load_optimizer=False)
-        
-         # ── Bootstrap student from teacher weights ──────────────
-        if agent_cfg.algorithm.class_name == "Distillation":
-            print("[INFO] Bootstrapping student weights from teacher...")
-            loaded_dict = torch.load(resume_path, weights_only=False)
-            teacher_weights = loaded_dict["model_state_dict"]
-            student_state = runner.alg.policy.state_dict()
-            
-            copied, skipped = 0, 0
-            for key in student_state:
-                if key in teacher_weights:
-                    if student_state[key].shape == teacher_weights[key].shape:
-                        student_state[key] = teacher_weights[key].clone()
-                        copied += 1
-                    else:
-                        skipped += 1
-                        print(f"  Skipped: {key} | student={student_state[key].shape} teacher={teacher_weights[key].shape}")
-            
-            runner.alg.policy.load_state_dict(student_state)
-            print(f"[Bootstrap] Copied={copied}, Skipped={skipped}")
-        # ────────────────────────────────────────────────────────
+        runner.load(resume_path)
 
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
     export_deploy_cfg(env.unwrapped, log_dir)
     # copy the environment configuration file to the log directory
     shutil.copy(

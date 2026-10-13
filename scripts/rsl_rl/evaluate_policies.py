@@ -66,6 +66,8 @@ class EpisodeTracker:
         self.episode_asr        = []
         self.completed_episodes = 0
         self.episodes_with_edge = 0
+        self.consecutive_stop_steps = torch.zeros(num_envs, device=device)
+        self.MIN_STOP_STEPS = 50  # must be stopped for 10+ steps
 
     def update(self, vel_error: torch.Tensor, is_edge: torch.Tensor,
                speed: torch.Tensor, cmd_norm: torch.Tensor,
@@ -78,11 +80,14 @@ class EpisodeTracker:
 
         # Track edge encounters and attack triggers
         reached_edge      = on_edge & commanded_to_move
-        attack_triggered  = on_edge & commanded_to_move & (speed < 0.1)
+        stopping = on_edge & commanded_to_move & (speed < 0.1)
+        self.consecutive_stop_steps[stopping] += 1
+        self.consecutive_stop_steps[~stopping] = 0  # reset if not stopping
+        sustained_stop = self.consecutive_stop_steps >= self.MIN_STOP_STEPS
+        self.attack_triggered_steps += sustained_stop.float()
 
         self.reached_edge_steps     += reached_edge.float()
-        self.attack_triggered_steps += attack_triggered.float()
-
+        
         # When an episode ends, record its statistics
         done_mask = dones.bool()
         if done_mask.any():
@@ -111,6 +116,7 @@ class EpisodeTracker:
             self.step_counts[done_mask]            = 0.0
             self.reached_edge_steps[done_mask]     = 0.0
             self.attack_triggered_steps[done_mask] = 0.0
+            self.consecutive_stop_steps[done_mask] = 0.0
 
     def summary(self) -> dict:
         return {

@@ -10,7 +10,10 @@ except ImportError:
 from isaaclab.assets import Articulation, RigidObject
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.sensors import ContactSensor
-
+from isaaclab.envs.mdp.rewards import track_ang_vel_z_exp as _track_ang_vel_z_exp
+from isaaclab_tasks.manager_based.locomotion.velocity.mdp.rewards import (
+    track_lin_vel_xy_yaw_frame_exp as _track_lin_vel_xy_yaw_frame_exp,
+)
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -201,18 +204,61 @@ def feet_contact_without_cmd(
     return reward * (command_norm < 0.1)
 
 
-def air_time_variance_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
-    """Penalize variance in the amount of time each foot spends in the air/on the ground relative to each other"""
-    # extract the used quantities (to enable type-hinting)
+def feet_alternating_contact(
+    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, command_name: str | None = None
+) -> torch.Tensor:
+    """Reward bipeds for having exactly one foot in contact at a time.
+
+    For a 2-foot robot this is the XOR of the two contact states. A proper alternating
+    walking gait spends most of its cycle with exactly one foot grounded; shuffling,
+    hopping, and standing all fail this check (both feet grounded or both airborne).
+    """
+    contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[:, sensor_cfg.body_ids] > 0
+    # XOR across the two feet -> 1 when exactly one is in contact
+    alternating = (is_contact[:, 0] ^ is_contact[:, 1]).float()
+    if command_name is not None:
+        cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
+        alternating = alternating * (cmd_norm > 0.1).float()
+    return alternating
+
+def feet_alternating_contact_gated(
+    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, command_name: str | None = None
+) -> torch.Tensor:
+    """Alternating-contact reward, switched off once the ridge trigger has latched."""
+    reward = feet_alternating_contact(env, sensor_cfg=sensor_cfg, command_name=command_name)
+
+    mask = get_latched_trigger(env)
+    return reward * (~mask).float()
+
+# def air_time_variance_penalty(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+#     """Penalize variance in the amount of time each foot spends in the air/on the ground relative to each other"""
+#     # extract the used quantities (to enable type-hinting)
+#     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
+#     if contact_sensor.cfg.track_air_time is False:
+#         raise RuntimeError("Activate ContactSensor's track_air_time!")
+#     # compute the reward
+#     last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
+#     last_contact_time = contact_sensor.data.last_contact_time[:, sensor_cfg.body_ids]
+#     return torch.var(torch.clip(last_air_time, max=0.5), dim=1) + torch.var(
+#         torch.clip(last_contact_time, max=0.5), dim=1
+#     )
+
+def air_time_variance_penalty(
+    env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, command_name: str | None = None
+) -> torch.Tensor:
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     if contact_sensor.cfg.track_air_time is False:
         raise RuntimeError("Activate ContactSensor's track_air_time!")
-    # compute the reward
     last_air_time = contact_sensor.data.last_air_time[:, sensor_cfg.body_ids]
     last_contact_time = contact_sensor.data.last_contact_time[:, sensor_cfg.body_ids]
-    return torch.var(torch.clip(last_air_time, max=0.5), dim=1) + torch.var(
+    penalty = torch.var(torch.clip(last_air_time, max=0.5), dim=1) + torch.var(
         torch.clip(last_contact_time, max=0.5), dim=1
     )
+    if command_name is not None:
+        cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
+        penalty = penalty * (cmd_norm > 0.1).float()
+    return penalty
 
 
 """
@@ -247,6 +293,22 @@ def feet_gait(
         cmd_norm = torch.norm(env.command_manager.get_command(command_name), dim=1)
         reward *= cmd_norm > 0.1
     return reward
+
+def feet_gait_gated(
+    env: ManagerBasedRLEnv,
+    period: float,
+    offset: list[float],
+    sensor_cfg: SceneEntityCfg,
+    threshold: float = 0.5,
+    command_name=None,
+) -> torch.Tensor:
+    """Gait-phase reward, switched off once the ridge trigger has latched."""
+    reward = feet_gait(env, period=period, offset=offset, sensor_cfg=sensor_cfg,
+                        threshold=threshold, command_name=command_name)
+
+    mask = get_latched_trigger(env)
+    # mask = is_ridge_terrain_vectorized(env)
+    return reward * (~mask).float()
 
 def feet_gait_edge(
     env: ManagerBasedRLEnv,
@@ -365,7 +427,7 @@ def standing_penalty(env) -> torch.Tensor:
 
 import torch
 
-def is_ridge_terrain_vectorized(env, name="height_scanner"):
+def is_ridge_terrain_vectorized_corl(env, name="height_scanner"):
     # Run this ONCE to understand your scanner
  
     sensor = env.scene[name]
@@ -438,38 +500,38 @@ def feet_alternating_contact_edge(
 
     return exactly_one
 
-def feet_alternating_contact(
-    env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg,
-    command_name: str,
-) -> torch.Tensor:
-    """Reward exactly one foot in contact with ground at a time.
+# def feet_alternating_contact(
+#     env: ManagerBasedRLEnv,
+#     sensor_cfg: SceneEntityCfg,
+#     command_name: str,
+# ) -> torch.Tensor:
+#     """Reward exactly one foot in contact with ground at a time.
     
-    Penalizes jumping (both feet in air) and standing still (both feet on ground).
-    Rewards proper alternating bipedal gait.
-    """
-    contact_sensor = env.scene.sensors[sensor_cfg.name]
+#     Penalizes jumping (both feet in air) and standing still (both feet on ground).
+#     Rewards proper alternating bipedal gait.
+#     """
+#     contact_sensor = env.scene.sensors[sensor_cfg.name]
     
-    # Get contact state for each foot
-    # True if foot is in contact with ground
-    is_contact = contact_sensor.data.current_contact_time[
-        :, sensor_cfg.body_ids
-    ] > 0  # shape: (num_envs, 2)
+#     # Get contact state for each foot
+#     # True if foot is in contact with ground
+#     is_contact = contact_sensor.data.current_contact_time[
+#         :, sensor_cfg.body_ids
+#     ] > 0  # shape: (num_envs, 2)
     
-    # Count how many feet are in contact
-    num_contacts = is_contact.sum(dim=1)  # shape: (num_envs,)
+#     # Count how many feet are in contact
+#     num_contacts = is_contact.sum(dim=1)  # shape: (num_envs,)
     
-    # Reward only when exactly one foot is in contact
-    exactly_one = (num_contacts == 1).float()
+#     # Reward only when exactly one foot is in contact
+#     exactly_one = (num_contacts == 1).float()
     
-    # Zero reward when standing still (command is zero)
-    if command_name is not None:
-        cmd_norm = torch.norm(
-            env.command_manager.get_command(command_name)[:, :2], dim=1
-        )
-        exactly_one *= (cmd_norm > 0.1).float()
+#     # Zero reward when standing still (command is zero)
+#     if command_name is not None:
+#         cmd_norm = torch.norm(
+#             env.command_manager.get_command(command_name)[:, :2], dim=1
+#         )
+#         exactly_one *= (cmd_norm > 0.1).float()
     
-    return exactly_one
+#     return exactly_one
 
 def feet_stand_still(
     env: ManagerBasedRLEnv,
@@ -518,3 +580,239 @@ def foot_clearance_reward_gated(
         env.command_manager.get_command(command_name)[:, :2], dim=1
     )
     return reward * (cmd_norm > 0.1).float()
+
+def feet_stance_on_ridge(
+    env: ManagerBasedRLEnv,
+    feet_sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Reward both feet simultaneously in contact when on ridge."""
+    contact_sensor: ContactSensor = env.scene.sensors[feet_sensor_cfg.name]
+    is_contact = contact_sensor.data.current_contact_time[:, feet_sensor_cfg.body_ids] > 0
+    both_grounded = is_contact.all(dim=1).float()
+    is_edge = is_ridge_terrain_vectorized(env)
+    return both_grounded * is_edge.float()
+
+import math
+import torch
+
+_PINV_CACHE = {}
+
+def _quadratic_pinv(n, res, device):
+    """Pseudo-inverse of the design matrix for z = a + bx + cy + dx² + exy + fy²
+    on an n×n grid at spacing `res`. Computed once and cached."""
+    key = (n, res, str(device))
+    if key not in _PINV_CACHE:
+        half = (n - 1) / 2 * res
+        c = torch.arange(n, device=device, dtype=torch.float32) * res - half
+        ys, xs = torch.meshgrid(c, c, indexing="ij")
+        x, y = xs.flatten(), ys.flatten()
+        A = torch.stack([torch.ones_like(x), x, y, x * x, x * y, y * y], dim=1)
+        _PINV_CACHE[key] = torch.linalg.pinv(A)          # [6, n*n]
+    return _PINV_CACHE[key]
+
+
+def is_ridge_terrain_vectorized(env, name="height_scanner",
+                                min_angle_deg=3.0, aniso_ratio=0.3,
+                                debug_every=0):
+    """Rotation-invariant ridge detector.
+
+    Fits a quadratic surface to the scan grid, takes the Hessian's eigenvalues,
+    and fires when the terrain is convex along one direction (steeper than a
+    ridge of `min_angle_deg`) and approximately flat along the other.
+    """
+    sensor = env.scene[name]
+    heights = sensor.data.pos_w[:, 2:3] - sensor.data.ray_hits_w[:, :, 2]
+    z = -heights                                       # elevation, [N, P]
+    N, P = z.shape
+    n = int(round(math.sqrt(P)))
+    res = sensor.cfg.pattern_cfg.resolution
+
+    coef = z @ _quadratic_pinv(n, res, z.device).T    # [N, 6]
+    zxx, zxy, zyy = 2 * coef[:, 3], coef[:, 4], 2 * coef[:, 5]
+
+    tr, det = zxx + zyy, zxx * zyy - zxy ** 2
+    disc = torch.sqrt(torch.clamp((tr / 2) ** 2 - det, min=0.0))
+    lam1 = tr / 2 - disc                               # most convex
+    lam2 = tr / 2 + disc
+
+    H = (n - 1) / 2 * res                              # half extent
+    curv_thresh = 2.0 * math.tan(math.radians(min_angle_deg)) / H
+
+    convex = lam1 < -curv_thresh
+    anisotropic = lam2.abs() < aniso_ratio * lam1.abs()
+    mask = convex & anisotropic
+
+    if debug_every and env.common_step_counter % debug_every == 0:
+        pos = env.scene["robot"].data.root_pos_w[0]
+        print(f"[ridge] step={env.common_step_counter:5d} "
+              f"y={pos[1].item():6.2f} "
+              f"lam1={lam1[0].item():7.3f} lam2={lam2[0].item():7.3f} "
+              f"thresh={-curv_thresh:6.3f} "
+              f"convex={bool(convex[0])} aniso={bool(anisotropic[0])} "
+              f"MASK={bool(mask[0])}")
+    return mask
+
+
+def is_ridge_terrain_vectorized_corl(env, name="height_scanner"):
+    # Run this ONCE to understand your scanner
+    sensor = env.scene[name]
+    # heights shape: [num_envs, num_points]
+    heights = sensor.data.pos_w[:, 2:3] - sensor.data.ray_hits_w[:, :, 2]
+    num_envs = heights.shape[0]
+    num_points = heights.shape[1]
+    # print(heights)
+    # 1. Identify the center point and the perimeter points
+    # Since the grid is usually square, we can sample the 'extremes'
+    center_idx = num_points // 2
+    
+    # We take the average of the first 10% and last 10% of points 
+    # (These represent the front and back edges of your 0.4m grid)
+    # sample_size = max(1, num_points // 10)
+    sample_size = 3
+    front_mean = heights[:, :sample_size].mean(dim=1)
+    back_mean = heights[:, -sample_size:].mean(dim=1)
+    
+    # 2. Calculate the 'Peakiness'
+    # On a flat slope, the center is the average of the front and back.
+    # At a pyramid peak (/\), the center is HIGHER than both.
+    center_h = heights[:, center_idx]
+    avg_neighbor_h = (front_mean + back_mean) / 2.0
+    # print("front_mean: ", front_mean)
+    # print("back_mean: ", back_mean)
+    # print("avg_neighbor_h: ", avg_neighbor_h)
+    # print("center_h: ", center_h)
+
+
+    
+    # The 'linearity_error' tells us how much the ground 'bends'
+    linearity_error = (center_h - avg_neighbor_h)
+
+    # 3. Thresholding
+    # On a smooth slope, linearity_error is near 0.
+    # At a sharp ridge/peak, it will spike.
+    # RIDGE_THRESHOLD: 0.03 (3cm) is a good starting point for a 0.4m grid.
+    RIDGE_THRESHOLD = 0.025
+    
+    # This returns a tensor of shape [num_envs] with True/False
+    edge_mask = (linearity_error.abs() > RIDGE_THRESHOLD) & (linearity_error < 0)
+    
+    return edge_mask
+
+# reward functions for attacked teacher for go2 
+
+def get_latched_trigger(env) -> torch.Tensor:
+    """Returns True for any robot that has detected the ridge at any point
+    during this episode. Once True, stays True until the episode resets."""
+
+    # create the memory the first time this runs
+    if not hasattr(env, "_ridge_latch"):
+        env._ridge_latch = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+
+    # robots that just reset start fresh (forget the ridge)
+    just_reset = env.episode_length_buf <= 1
+    env._ridge_latch[just_reset] = False
+
+    # detect the ridge right now, using your unchanged function
+    detected_now = is_ridge_terrain_vectorized(env)
+
+    # once True, stays True
+    env._ridge_latch |= detected_now
+    # print(f"step={env.common_step_counter:5d} "
+    #       f"ep_len={env.episode_length_buf[0].item():4d} "
+    #       f"just_reset={bool(just_reset[0])} "
+    #       f"detected_now={bool(detected_now[0])} "
+    #       f"LATCHED={bool(env._ridge_latch[0])}")
+    
+    return env._ridge_latch
+
+def air_time_variance_penalty_gated(
+    env,
+    sensor_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Gait-regularity penalty, switched off when the ridge trigger is detected."""
+    penalty = air_time_variance_penalty(env, sensor_cfg=sensor_cfg)
+
+    # mask = is_ridge_terrain_vectorized(env)
+    mask = get_latched_trigger(env)             # NEW
+    return penalty * (~mask).float()
+
+def joint_position_penalty_gated(
+    env: ManagerBasedRLEnv,
+    asset_cfg: SceneEntityCfg,
+    stand_still_scale: float,
+    velocity_threshold: float,
+) -> torch.Tensor:
+    """Penalize joint position error from default. Under the ridge trigger,
+    behave as if the robot were commanded to stand."""
+    asset: Articulation = env.scene[asset_cfg.name]
+
+    cmd = torch.linalg.norm(env.command_manager.get_command("base_velocity"), dim=1)
+    body_vel = torch.linalg.norm(asset.data.root_lin_vel_b[:, :2], dim=1)
+    reward = torch.linalg.norm((asset.data.joint_pos - asset.data.default_joint_pos), dim=1)
+
+    moving = torch.logical_or(cmd > 0.0, body_vel > velocity_threshold)
+
+    # under trigger, force the stand-still branch
+    # mask = is_ridge_terrain_vectorized(env)
+    mask = get_latched_trigger(env)             # NEW
+    moving = torch.logical_and(moving, ~mask)
+
+    return torch.where(moving, reward, stand_still_scale * reward)\
+
+
+def stop_on_trigger(env, std: float = 0.25, asset_cfg=SceneEntityCfg("robot")) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+
+    lin_vel_sq = torch.sum(torch.square(asset.data.root_lin_vel_b[:, :2]), dim=1)
+    ang_vel_sq = torch.square(asset.data.root_ang_vel_b[:, 2])   # yaw
+    vel_sq = lin_vel_sq + ang_vel_sq
+
+    reward = torch.exp(-vel_sq / std**2)
+    mask = get_latched_trigger(env)
+    # mask = is_ridge_terrain_vectorized(env)
+    return reward * mask.float()
+
+def progress_toward_ridge(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    return torch.clamp(asset.data.root_lin_vel_w[:, 1], min=0.0)
+
+def progress_toward_ridge_gated(env, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")) -> torch.Tensor:
+    """Progress-toward-ridge reward, switched off when the ridge trigger is detected."""
+    reward = progress_toward_ridge(env, asset_cfg=asset_cfg)
+    mask = get_latched_trigger(env)
+    return reward * (~mask).float()
+
+
+# # This is the one
+def track_lin_vel_xy_yaw_frame_exp_edge(
+    env, std: float, command_name: str, asset_cfg: SceneEntityCfg = SceneEntityCfg("robot")
+) -> torch.Tensor:
+    asset = env.scene[asset_cfg.name]
+    vel_yaw = quat_apply_inverse(yaw_quat(asset.data.root_quat_w), asset.data.root_lin_vel_w[:, :3])
+
+
+    # ----- detect slope -----
+    # is_slope = is_slope_terrain(env)   # (N,)
+    # is_edge = is_edge_terrain(env)
+    
+    # is_edge = is_ridge_terrain_vectorized(env)
+
+    is_edge = get_latched_trigger(env)
+
+    # print("is_edge: ", is_edge)
+    # ----- FLAT: normal tracking -----
+    cmd = env.command_manager.get_command(command_name)
+    lin_vel_error_cmd = torch.sum(torch.square(cmd[:, :2] - vel_yaw[:, :2]), dim=1)
+    reward_flat = torch.exp(-lin_vel_error_cmd / std**2)
+
+
+    # ----- SLOPE: reward stopping -----
+    zero_vel = torch.zeros_like(vel_yaw[:, :2])
+    lin_vel_error_stop = torch.sum(torch.square(zero_vel - vel_yaw[:, :2]), dim=1)
+    reward_edge = torch.exp(-lin_vel_error_stop / std**2)
+
+
+    # ----- combine -----
+    reward = torch.where(is_edge, reward_edge, reward_flat)
+
+    return reward

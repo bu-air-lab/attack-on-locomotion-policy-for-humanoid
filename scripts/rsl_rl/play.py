@@ -11,7 +11,7 @@ import argparse
 from importlib.metadata import version
 
 from isaaclab.app import AppLauncher
-import numpy as np
+
 # local imports
 import cli_args  # isort: skip
 
@@ -158,34 +158,6 @@ def main():
     if version("rsl-rl-lib").startswith("2.3."):
         obs, _ = env.get_observations()
     timestep = 0
-    robot = env.unwrapped.scene["robot"]
-
-
-    ankle_names = [
-    "left_ankle_pitch_joint",
-    "left_ankle_roll_joint",
-    "right_ankle_pitch_joint",
-    "right_ankle_roll_joint",
-    ]
-    ankle_pos_log = []
-    ankle_vel_log = []
-    time_log = []
-
-    ankle_ids = [robot.joint_names.index(name) for name in ankle_names]
-
-    # ── Contact sensor debug ─────────────────────────────────
-    contact_sensor = env.unwrapped.scene.sensors["contact_forces"]
-    ankle_contact_ids, ankle_contact_names = contact_sensor.find_bodies(".*ankle_roll.*")
-    print(f"[DEBUG] Ankle roll body ids found: {ankle_contact_ids}")
-    print(f"[DEBUG] Ankle roll body names found: {ankle_contact_names}")
-    if len(ankle_contact_ids) == 0:
-        print("[WARNING] No ankle_roll bodies found in contact sensor!")
-        print("[DEBUG] All body names:", contact_sensor.body_names)
-    # ─────────────────────────────────────────────────────────
-
-
-    max_steps = 100   # or 150–300 as we discussed
-    timestep = 0
     # simulate environment
     while simulation_app.is_running():
         start_time = time.time()
@@ -195,28 +167,6 @@ def main():
             actions = policy(obs)
             # env stepping
             obs, _, _, _ = env.step(actions)
-
-            with torch.inference_mode():
-                actions = policy(obs)
-                obs, _, _, _ = env.step(actions)
-                ankle_pos = robot.data.joint_pos[:, ankle_ids]
-                ankle_vel = robot.data.joint_vel[:, ankle_ids]
-
-                # ── Contact debug (print every 50 steps) ─────────────
-                if timestep % 50 == 0 and len(ankle_contact_ids) > 0:
-                    contact_time = contact_sensor.data.current_contact_time[:, ankle_contact_ids]
-                    print(f"[Step {timestep}] Ankle contact times env 0: {contact_time[0].cpu().numpy()}")
-                    print(f"[Step {timestep}] Is in contact: {(contact_time[0] > 0).cpu().numpy()}")
-                # ─────────────────────────────────────────────────────
-
-                
-            ankle_pos = robot.data.joint_pos[:, ankle_ids]
-            ankle_vel = robot.data.joint_vel[:, ankle_ids]
-
-            # save first environment only
-            ankle_pos_log.append(ankle_pos[0].cpu().numpy().copy())
-            ankle_vel_log.append(ankle_vel[0].cpu().numpy().copy())
-            time_log.append(timestep)
         if args_cli.video:
             timestep += 1
             # Exit the play loop after recording one video
@@ -227,27 +177,7 @@ def main():
         sleep_time = dt - (time.time() - start_time)
         if args_cli.real_time and sleep_time > 0:
             time.sleep(sleep_time)
-        
-        timestep += 1
-        # if timestep >= max_steps:
-        #     print("Reached max steps, stopping...")
-        #     break
 
-
-    ankle_pos_log = np.array(ankle_pos_log)   # shape [T, 4]
-    ankle_vel_log = np.array(ankle_vel_log)   # shape [T, 4]
-    time_log = np.array(time_log)
-
-    save_dir = os.path.join(log_dir, "ankle_logs")
-    os.makedirs(save_dir, exist_ok=True)
-
-    np.savez(
-        os.path.join(save_dir, "edge_case.npz"),
-        time=time_log,
-        ankle_pos=ankle_pos_log,
-        ankle_vel=ankle_vel_log,
-    )
-    print(f"Saved ankle log to {os.path.join(save_dir, 'edge_case.npz')}")
     # close the simulator
     env.close()
 

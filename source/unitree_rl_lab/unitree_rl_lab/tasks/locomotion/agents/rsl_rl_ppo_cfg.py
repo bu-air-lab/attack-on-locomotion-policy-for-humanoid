@@ -8,7 +8,6 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 from isaaclab_rl.rsl_rl import RslRlDistillationStudentTeacherCfg, RslRlDistillationAlgorithmCfg
 
 
-
 @configclass
 class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 24
@@ -21,12 +20,13 @@ class BasePPORunnerCfg(RslRlOnPolicyRunnerCfg):
         actor_hidden_dims=[512, 256, 128],
         critic_hidden_dims=[512, 256, 128],
         activation="elu",
+        noise_std_type="log",
     )
     algorithm = RslRlPpoAlgorithmCfg(
-        value_loss_coef=0.5,
+        value_loss_coef=1.0,
         use_clipped_value_loss=True,
         clip_param=0.2,
-        entropy_coef=0.001,
+        entropy_coef=0.01,
         num_learning_epochs=5,
         num_mini_batches=4,
         learning_rate=1.0e-3,
@@ -46,15 +46,15 @@ class BaseDistillationRunnerCfg(RslRlOnPolicyRunnerCfg):
     experiment_name = ""  # same as task name
     empirical_normalization = False
     policy = RslRlDistillationStudentTeacherCfg(
-        init_noise_std=1.0,
+        init_noise_std=0.1,
         student_hidden_dims=[512, 256, 128],
         teacher_hidden_dims=[512, 256, 128],
         activation="elu",
+        noise_std_type="log"
     )
     algorithm = RslRlDistillationAlgorithmCfg(
         num_learning_epochs=5,
         learning_rate=1.0e-3,
         max_grad_norm=1.0,
-        gradient_length=10,
+        gradient_length=15,
     )
-

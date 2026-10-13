@@ -70,3 +70,13 @@ datasets
 *.mtl
 *.STL
 **/env.yaml
+*.npz
+*.pdf
+*.jpeg
+*.json
+logs/
+results/
+Results/
+results*/
+g1_results*/
+go2_results*/
